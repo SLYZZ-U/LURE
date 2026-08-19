@@ -1,0 +1,77 @@
+// LURE trace event log schema.
+// One TraceFile per instrumentation run; events are appended in execution order.
+namespace lure.trace;
+
+enum ValueType : byte {
+    Nil = 0,
+    Bool = 1,
+    Number = 2,
+    String = 3,
+    Table = 4,
+    Function = 5,
+    Native = 6,
+    Unknown = 7
+}
+
+enum ResolutionStatus : byte {
+    Resolved = 0,
+    Unresolved = 1
+}
+
+table LuaValueSnapshot {
+    vtype: ValueType;
+    text: string;        // stringified form of the observed value
+    nvalue: double;      // numeric value when vtype == Number
+    unres_reason: string;// why the value could not be resolved (vtype == Unknown)
+}
+
+table CallInfo {
+    fn: LuaValueSnapshot;
+    args: [LuaValueSnapshot];
+    nresults: uint;
+    native_name: string; // stdlib name when the callee is a whitelisted native
+}
+
+table TableOpInfo {
+    table: LuaValueSnapshot;
+    key: LuaValueSnapshot;
+    value: LuaValueSnapshot;
+    is_set: bool;
+}
+
+table TraceEvent {
+    pc: uint64;           // offset of the instruction about to be executed
+    opcode: uint8;        // raw opcode byte (Luau LuaOpcode / VM tag hash)
+    line: uint32;         // best-effort source line
+    call_depth: uint32;   // call frame nesting at dispatch time
+    tag: string;          // mnemonic ("LOADK", "CALL", "BRANCH", ...)
+    text: string;         // textual sketch of the statement/expression executed
+    stack: [LuaValueSnapshot];
+    locals: [LuaValueSnapshot];
+    call: CallInfo;       // present iff the instruction is a call
+    table_op: TableOpInfo;// present iff the instruction is GETTABLE/SETTABLE
+    is_branch: bool;      // TRUE iff this instruction is a jump/branch
+    cond_dsl: string;     // concolic DSL of the branch condition ("" if none)
+    cond_text: string;    // printable condition expression
+    branch_taken: bool;   // which side the executed path took
+    jump_target: uint32;  // pc offset of the next executed instruction (only for branch/jump events)
+    other_target: int32 = -1; // pc offset of the unexplored side (branch/jump events); -1 = unknown
+    status: ResolutionStatus = Resolved;
+    notfound_reason: string; // exact reason when status == Unresolved
+    printed_output: bool = false; // call events that wrote to the observable output stream
+    // Appended fields (flatbuffers requires new fields at the end of a table).
+    insn: uint32;         // raw fused instruction word (A/B/C operand fields)
+    frame_id: uint32;     // serial of the executing call frame (per call site)
+    cond_rhs_reg: int32 = -1; // register of a two-operand conditional's rhs; -1 = none
+    proto_id: uint32;     // stable per-run id of the function the pc belongs to
+    k_text: string;       // Lua literal of the instruction's constant operand, if any
+}
+
+table TraceFile {
+    source_script: string;
+    mode: string;         // "fast" | "full"
+    vm_kind: string;      // "mock" | "luau-instrumented"
+    events: [TraceEvent];
+}
+
+root_type TraceFile;

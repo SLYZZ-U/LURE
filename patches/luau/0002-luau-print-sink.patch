@@ -1,0 +1,38 @@
+From: LURE
+Subject: [PATCH 2/2] Route luaB_print through an overridable sink hook
+
+The verification pass re-runs decompiled payloads in the same process.
+Capturing "print" by redirecting the process stdout stream corrupts the
+CRT stream state for in-process loggers (spdlog) on the second capture
+cycle. Route luaB_print through a process-global hook instead so the
+runner can buffer print output without touching stdout.
+
+---
+ VM/src/lbaselib.cpp | 10 +++++++++-
+ 1 file changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/VM/src/lbaselib.cpp b/VM/src/lbaselib.cpp
+index 9682658a..a57ec5f4 100644
+--- a/VM/src/lbaselib.cpp
++++ b/VM/src/lbaselib.cpp
+@@ -11,9 +11,17 @@
+ #include <stdio.h>
+ #include <stdlib.h>
+ 
++// LURE hook: capture "print" output without touching the process stdout
++// stream (fd juggling breaks in-process loggers). Set by
++// src/vm/luau_vm_runner.cpp; null means plain stdout.
++extern "C" void (*lure_luau_print_sink)(const char* s, size_t l);
++
+ static void writestring(const char* s, size_t l)
+ {
+-    fwrite(s, 1, l, stdout);
++    if (lure_luau_print_sink)
++        lure_luau_print_sink(s, l);
++    else
++        fwrite(s, 1, l, stdout);
+ }
+ 
+ static int luaB_print(lua_State* L)
+-- 
+2.46.0.windows.1
